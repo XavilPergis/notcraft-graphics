@@ -1,0 +1,11 @@
+[package]
+name = "notcraft-graphics"
+version = "0.1.0"
+authors = ["xavil <max.duzen@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+gl = "*"
+
+# TODO: put this behind a feature gate
+cgmath = "*"
