@@ -1,12 +1,13 @@
 use gl;
 
-use crate::buffer::{Buffer, BufferTarget};
-use crate::layout::Layout;
-use crate::limits::Limits;
-use crate::program::program::Program;
-use crate::vertex_array::VertexArray;
-use crate::BufferIndex;
-use crate::PrimitiveType;
+use crate::{
+    buffer::{Buffer, BufferTarget},
+    layout::{DataSource, InterleavedAttribute},
+    limits::Limits,
+    program::program::Program,
+    vertex_array::VertexArray,
+    BufferIndex, PrimitiveType,
+};
 
 use std::{
     any::{Any, TypeId},
@@ -16,37 +17,6 @@ use std::{
     rc::Rc,
     sync::Mutex,
 };
-
-pub(crate) struct Entry<'v, V>(
-    ::std::collections::hash_map::Entry<'v, TypeId, Box<dyn Any>>,
-    PhantomData<*const V>,
-);
-
-impl<'v, V: 'static> Entry<'v, V> {
-    fn or_insert_with<F: FnOnce() -> VertexArray<V>>(self, func: F) -> &'v mut VertexArray<V> {
-        self.0
-            .or_insert_with(|| Box::new(func()))
-            .downcast_mut()
-            .unwrap()
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct VaoMap {
-    table: HashMap<TypeId, Box<dyn Any>>,
-}
-
-impl VaoMap {
-    pub(crate) fn new() -> Self {
-        VaoMap {
-            table: HashMap::new(),
-        }
-    }
-
-    pub(crate) fn entry<'v, V: Any>(&'v mut self) -> Entry<'v, V> {
-        Entry(self.table.entry(TypeId::of::<V>()), PhantomData)
-    }
-}
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ViewportRect {
@@ -80,7 +50,7 @@ pub struct ContextInner {
     pub(crate) limits: Limits,
     pub(crate) viewport: Cell<ViewportRect>,
 
-    pub(crate) format_cache: RefCell<VaoMap>,
+    pub(crate) format_cache: RefCell<HashMap<TypeId, VertexArray>>,
 }
 
 impl Context {
@@ -95,69 +65,62 @@ impl Context {
 
             limits: Limits::load(),
             viewport: Cell::new(ViewportRect::query()),
-            format_cache: RefCell::new(VaoMap::new()),
+            format_cache: RefCell::new(HashMap::new()),
         }))
     }
 
     // self.ctx.draw_elements(gl::TRIANGLES, &self.vertices, &self.indices);
-    pub fn draw_elements<V: Layout, I: BufferIndex>(
-        &mut self,
-        primitive: PrimitiveType,
-        program: &Program,
-        vertices: &Buffer<V>,
-        indices: &Buffer<I>,
-    ) {
-        if vertices.len() > 0 {
-            program.bind(self);
+    // pub fn draw_elements<V: DataSource, I: BufferIndex>(
+    //     &mut self,
+    //     primitive: PrimitiveType,
+    //     program: &Program<V>,
+    //     vertices: &Buffer<V>,
+    //     indices: &Buffer<I>,
+    // ) {
+    //     if vertices.len() > 0 {
+    //         program.bind(self);
 
-            // Find a VAO that describes our vertex format, creating one if it does not
-            // exist.
-            let mut map = self.0.format_cache.borrow_mut();
-            let vao = map.entry::<V>().or_insert_with(|| {
-                VertexArray::<V>::for_vertex_type(self).with_buffer(self, vertices)
-            });
+    //         // Find a VAO that describes our vertex format, creating one if it
+    // does not         // exist.
+    //         let mut map = self.0.format_cache.borrow_mut();
+    //         let vao = map.entry::<V>().or_insert_with(|| {
+    //             VertexArray::<V>::for_vertex_type(self).with_buffer(self,
+    // vertices)         });
 
-            // set the buffer binding the the buffer that was passed in
-            vao.set_buffer(self, vertices);
-            vao.bind(self);
-            indices.bind(self, BufferTarget::Element);
+    //         // set the buffer binding the the buffer that was passed in
+    //         vao.set_buffer(self, vertices);
+    //         vao.bind(self);
+    //         indices.bind(BufferTarget::Element);
 
-            gl_call!(assert DrawElements(
-                primitive as u32,
-                indices.len() as i32,
-                I::INDEX_TYPE,
-                0 as *const _
-            ));
-        }
-    }
+    //         gl_call!(assert DrawElements(
+    //             primitive as u32,
+    //             indices.len() as i32,
+    //             I::INDEX_TYPE,
+    //             0 as *const _
+    //         ));
+    //     }
+    // }
 
     // self.ctx.draw_elements(gl::TRIANGLES, &shader, &self.vertices);
-    pub fn draw_arrays<V: Layout>(
+    pub fn draw_arrays<'v, V, I>(
         &mut self,
         primitive: PrimitiveType,
-        program: &Program,
-        vertices: &Buffer<V>,
-    ) {
-        if vertices.len() > 0 {
-            program.bind(self);
+        program: &Program<V>,
+        data: V::Buffers,
+    ) where
+        V: DataSource<'v>,
+    {
+        program.bind();
 
-            // Find a VAO that describes our vertex format, creating one if it does not
-            // exist.
-            let mut map = self.0.format_cache.borrow_mut();
-            let vao = map.entry::<V>().or_insert_with(|| {
-                VertexArray::<V>::for_vertex_type(self).with_buffer(self, vertices)
-            });
+        let mut map = self.0.format_cache.borrow_mut();
+        let vao = map
+            .entry(TypeId::of::<V>())
+            .or_insert_with(|| VertexArray::for_data_source::<V>(self));
 
-            // set the buffer binding the the buffer that was passed in
-            vao.set_buffer(self, vertices);
-            vao.bind(self);
+        vao.bind();
+        V::apply_sources(data, &mut vao.binder());
 
-            gl_call!(assert DrawArrays(
-                primitive as u32,
-                0,
-                vertices.len() as i32
-            ));
-        }
+        gl_call!(assert DrawArrays(primitive as u32, 0, unimplemented!()));
     }
 
     pub fn limits(&self) -> &Limits {

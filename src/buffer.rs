@@ -85,10 +85,7 @@ pub struct Buffer<T> {
     _phantom: PhantomData<*const T>,
 }
 
-unsafe impl<T> Send for Buffer<T> {}
-unsafe impl<T> Sync for Buffer<T> {}
-
-impl<T> Buffer<T> {
+impl<T: Copy> Buffer<T> {
     pub fn new(ctx: &Context) -> Self {
         Buffer {
             raw: RawBuffer::new(ctx),
@@ -96,12 +93,12 @@ impl<T> Buffer<T> {
         }
     }
 
-    pub fn bind(&self, _ctx: &Context, target: BufferTarget) {
+    pub(crate) fn bind(&self, target: BufferTarget) {
         gl_call!(debug BindBuffer(target as u32, self.raw.id));
     }
 
     /// Copies data from `data` to the gpu's memory
-    pub fn upload(&mut self, _ctx: &Context, data: &[T], usage_type: UsageType) -> GlResult<()> {
+    pub fn upload(&mut self, data: &[T], usage_type: UsageType) -> GlResult<()> {
         self.raw.len = data.len();
         // Could fail if OOM
         gl_call!(NamedBufferData(
@@ -114,5 +111,37 @@ impl<T> Buffer<T> {
 
     pub fn len(&self) -> usize {
         self.raw.len
+    }
+}
+
+pub struct BufferBuilder<'d, T> {
+    usage: UsageType,
+    data: Option<&'d [T]>,
+}
+
+impl<'d, T: Copy> BufferBuilder<'d, T> {
+    pub fn new() -> Self {
+        BufferBuilder {
+            usage: UsageType::StaticDraw,
+            data: None,
+        }
+    }
+
+    pub fn with_usage(mut self, usage: UsageType) -> Self {
+        self.usage = usage;
+        self
+    }
+
+    pub fn with_data(mut self, data: &'d [T]) -> Self {
+        self.data = Some(data);
+        self
+    }
+
+    pub fn build(self, ctx: &Context) -> GlResult<Buffer<T>> {
+        let mut buf = Buffer::new(ctx);
+        if let Some(data) = self.data {
+            buf.upload(data, self.usage)?;
+        }
+        Ok(buf)
     }
 }

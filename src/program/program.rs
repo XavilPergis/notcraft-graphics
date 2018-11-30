@@ -3,6 +3,7 @@ use crate::context::Context;
 use crate::program::uniform::*;
 use gl::{self, types::*};
 use std::collections::HashMap;
+use std::marker::PhantomData;
 
 pub struct RawProgram {
     id: u32,
@@ -31,7 +32,8 @@ impl ProgramBuilder {
         gl_call!(assert AttachShader(self.raw.id, shader.shader.id));
     }
 
-    pub fn link(self) -> Result<Program, LinkError> {
+    // FIXME: actually validate the shader interface and don't just return a typed version!
+    pub fn link<I>(self) -> Result<Program<I>, LinkError> {
         gl_call!(LinkProgram(self.raw.id))?;
         check_program_status(self.raw.id, gl::LINK_STATUS)?;
         gl_call!(ValidateProgram(self.raw.id))?;
@@ -39,32 +41,34 @@ impl ProgramBuilder {
         Ok(Program {
             raw: self.raw,
             uniform_cache: HashMap::new(),
+            _marker: PhantomData,
         })
     }
 }
 
-pub struct Program {
+pub struct Program<I> {
     raw: RawProgram,
     uniform_cache: HashMap<String, UniformLocation>,
+    _marker: PhantomData<*const I>,
 }
 
-impl Program {
+impl<I> Program<I> {
     pub fn set_uniform<U: Uniform>(&mut self, ctx: &Context, name: &str, uniform: &U) {
-        self.bind(ctx);
+        self.bind();
         if let Some(&location) = self.uniform_cache.get(name) {
             uniform.set_uniform(ctx, location);
         } else {
-            let location = self.get_uniform_location(ctx, name);
+            let location = self.get_uniform_location(name);
             self.uniform_cache.insert(name.into(), location);
             uniform.set_uniform(ctx, location);
         }
     }
 
-    pub fn bind(&self, ctx: &Context) {
+    pub fn bind(&self) {
         gl_call!(assert UseProgram(self.raw.id));
     }
 
-    fn get_uniform_location(&self, ctx: &Context, name: &str) -> UniformLocation {
+    fn get_uniform_location(&self, name: &str) -> UniformLocation {
         use std::ffi::CString;
         let c_string = CString::new(name).unwrap();
         // UNWRAP: program ID is valid, and the program has been successfully linked

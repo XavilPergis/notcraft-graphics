@@ -1,89 +1,86 @@
-use crate::buffer::Buffer;
-use crate::context::Context;
-use crate::layout::{AttributeFormat, Layout};
-use std::marker::PhantomData;
+use crate::{
+    buffer::{Buffer, BufferTarget},
+    context::Context,
+    layout::{AttributeFormat, DataSource, InterleavedAttribute},
+};
+use std::{marker::PhantomData, mem};
 
-#[derive(Debug, Eq, PartialEq)]
-pub struct RawVertexArray {
-    pub(crate) id: u32,
+pub struct Binder<'vao> {
+    vao: &'vao mut VertexArray,
+    index: usize,
 }
 
-impl RawVertexArray {
+// void glBindVertexBuffer(	GLuint bindingindex,
+//  	GLuint buffer,
+//  	GLintptr offset,
+//  	GLsizei stride);
+
+impl<'vao> Binder<'vao> {
+    pub(crate) fn bind_buffer<T>(&mut self, buffer: &'vao Buffer<T>) {
+        self.vao.bind();
+        gl_call!(assert BindVertexBuffer(self.index as u32, buffer.raw.id, 0, mem::size_of::<T>() as i32));
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct VertexArray {
+    pub(crate) id: u32,
+    attrib: usize,
+    binding: usize,
+}
+
+impl VertexArray {
+    pub(crate) fn for_data_source<'v, V: DataSource<'v>>(ctx: &Context) -> Self {
+        let mut vao = Self::new(ctx);
+        V::setup_sources(&mut vao);
+        vao
+    }
+
     pub(crate) fn new(_ctx: &Context) -> Self {
         let mut id = 0;
         gl_call!(assert CreateVertexArrays(1, &mut id));
 
-        RawVertexArray { id }
+        VertexArray {
+            id,
+            attrib: 0,
+            binding: 0,
+        }
+    }
+
+    pub(crate) fn bind(&self) {
+        gl_call!(debug BindVertexArray(self.id));
+    }
+
+    /// Pushes one buffer's worth of attributes. That is, (A, B) will push two
+    /// attributes but set the binding to the current binding index
+    pub(crate) fn push_binding<A: InterleavedAttribute>(&mut self) {
+        A::attribute_format(|attr| {
+            self.bind();
+
+            if attr.is_integer {
+                gl_call!(assert VertexAttribIFormat(self.attrib as u32, attr.dim as i32, attr.ty as u32, attr.offset as u32));
+            } else {
+                gl_call!(assert VertexAttribFormat(self.attrib as u32, attr.dim as i32, attr.ty as u32, attr.normalized as u8, attr.offset as u32));
+            }
+
+            gl_call!(assert VertexAttribBinding(self.attrib as u32, self.binding as u32));
+
+            self.attrib += 1;
+        });
+
+        self.binding += 1;
+    }
+
+    pub(crate) fn binder(&mut self) -> Binder<'_> {
+        Binder {
+            vao: self,
+            index: 0,
+        }
     }
 }
 
-impl Drop for RawVertexArray {
+impl Drop for VertexArray {
     fn drop(&mut self) {
         gl_call!(debug DeleteVertexArrays(1, &self.id));
-    }
-}
-
-// NOTE: this vertex array type only supports one vertex buffer bound at binding
-// index 0 (for now at least)
-#[derive(Debug, Eq, PartialEq)]
-pub struct VertexArray<V> {
-    pub(crate) raw: RawVertexArray,
-    attribs: Vec<AttributeFormat>,
-    _marker: PhantomData<*const V>,
-}
-
-unsafe impl<V> Send for VertexArray<V> {}
-unsafe impl<V> Sync for VertexArray<V> {}
-
-impl<V: Layout> VertexArray<V> {
-    pub fn for_vertex_type(ctx: &Context) -> Self {
-        let vao = VertexArray {
-            raw: RawVertexArray::new(ctx),
-            attribs: V::layout(),
-            _marker: PhantomData,
-        };
-
-        // TODO: is this actually correct?
-        let mut byte_offset = 0;
-        for (attr, fmt) in vao.attribs.iter().enumerate() {
-            vao.enable_attribute(attr);
-            vao.set_attribute_format(attr, *fmt, byte_offset);
-            vao.set_attribute_binding(attr, 0);
-            byte_offset += fmt.size();
-        }
-
-        vao
-    }
-
-    fn enable_attribute(&self, attr: usize) {
-        gl_call!(assert EnableVertexArrayAttrib(self.raw.id, attr as u32));
-    }
-
-    fn set_attribute_binding(&self, attr: usize, binding: usize) {
-        gl_call!(assert VertexArrayAttribBinding(self.raw.id, attr as u32, binding as u32));
-    }
-
-    fn set_attribute_format(&self, attr: usize, fmt: AttributeFormat, offset: usize) {
-        if fmt.ty.is_integer() {
-            gl_call!(assert VertexArrayAttribIFormat(self.raw.id, attr as u32, fmt.dim as i32, fmt.ty as u32, offset as u32));
-        } else {
-            gl_call!(assert VertexArrayAttribFormat(self.raw.id, attr as u32, fmt.dim as i32, fmt.ty as u32, gl::FALSE, offset as u32));
-        }
-    }
-
-    pub fn bind(&self, _ctx: &Context) {
-        // UNWRAP: our ID should always be valid
-        gl_call!(debug BindVertexArray(self.raw.id));
-    }
-
-    pub fn set_buffer(&mut self, _ctx: &Context, buffer: &Buffer<V>) {
-        // all of our attributes are on binding index 0 (second param)
-        // the data will start at the first element of the buffer (fourth param)
-        gl_call!(assert VertexArrayVertexBuffer(self.raw.id, 0, buffer.raw.id, 0, ::std::mem::size_of::<V>() as i32));
-    }
-
-    pub fn with_buffer(mut self, ctx: &Context, buffer: &Buffer<V>) -> Self {
-        self.set_buffer(ctx, buffer);
-        self
     }
 }

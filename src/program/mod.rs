@@ -27,7 +27,12 @@ impl From<io::Error> for PipelineError {
     }
 }
 
-pub fn load_shader<P1: AsRef<Path>, P2: AsRef<Path>>(ctx: &Context, vert: P1, frag: P2) -> Program {
+// FIXME: unbound and unchecked I!
+pub fn load_shader<I, P1: AsRef<Path>, P2: AsRef<Path>>(
+    ctx: &Context,
+    vert: P1,
+    frag: P2,
+) -> Program<I> {
     match simple_pipeline(ctx, vert, frag) {
         Ok(program) => program,
         Err(PipelineError::Shader(ShaderError::Shader(msg))) => {
@@ -42,11 +47,12 @@ pub fn load_shader<P1: AsRef<Path>, P2: AsRef<Path>>(ctx: &Context, vert: P1, fr
     }
 }
 
-pub fn simple_pipeline<P1: AsRef<Path>, P2: AsRef<Path>>(
+// FIXME: unbound and unchecked I!
+pub fn simple_pipeline<I, P1: AsRef<Path>, P2: AsRef<Path>>(
     ctx: &Context,
     vert: P1,
     frag: P2,
-) -> Result<Program, PipelineError> {
+) -> Result<Program<I>, PipelineError> {
     let program = ProgramBuilder::new(ctx);
     let vert_shader = Shader::new(ShaderType::Vertex)?;
     let frag_shader = Shader::new(ShaderType::Fragment)?;

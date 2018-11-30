@@ -1,3 +1,5 @@
+use crate::buffer::Buffer;
+use crate::layout::InterleavedAttribute;
 use gl::{self, types::*};
 
 pub trait BufferIndex: Copy + Sized + Send + Sync + 'static {
@@ -46,3 +48,17 @@ pub enum PrimitiveType {
     TriangleStrip = gl::TRIANGLE_STRIP,
     TriangleFan = gl::TRIANGLE_FAN,
 }
+
+pub struct DrawParams {
+    wireframe: Option<f32>,
+}
+
+// pub trait Surface {
+//     fn draw_arrays<V: Vertex>(&mut self, data: &Buffer<V>, program: Program);
+//     fn draw_elements<V: Vertex, I: BufferIndex>(
+//         &mut self,
+//         data: &Buffer<V>,
+//         indices: &Buffer<I>,
+//         program: Program,
+//     );
+// }

@@ -9,3 +9,6 @@ gl = "*"
 
 # TODO: put this behind a feature gate
 cgmath = "*"
+
+[dev-dependencies]
+glutin = "0.18.0"
